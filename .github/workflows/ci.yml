@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-unit:
+    name: build-and-unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build, unit + integration tests, package NAR
+        run: ./mvnw -B -ntp verify
+      - name: Upload NAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: kafka-protocol-handler-nar
+          path: kafka-protocol-handler/target/*.nar
+          if-no-files-found: error
+
+  e2e-kind:
+    name: e2e-kind
+    needs: build-and-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Package the NAR
+        run: ./mvnw -B -ntp -pl kafka-protocol-handler -am package -DskipTests
+      - name: Build the broker image
+        run: docker build -t kafka-pulsar-broker:e2e -f docker/Dockerfile.broker .
+      - name: Create KIND cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: kop-e2e
+      - name: Load the broker image into KIND
+        run: kind load docker-image kafka-pulsar-broker:e2e --name kop-e2e
+      - name: Deploy Pulsar standalone with the Kafka protocol
+        run: |
+          helm repo add apache https://pulsar.apache.org/charts
+          helm repo update
+          helm install pulsar-ci apache/pulsar \
+            --namespace pulsar --create-namespace \
+            --values deploy/values-standalone-kafka.yaml \
+            --wait --timeout 12m
+      - name: Wait for the standalone broker
+        run: kubectl -n pulsar wait --for=condition=ready pod -l component=standalone --timeout=300s
+      - name: Port-forward the Kafka listener to local 9092
+        run: |
+          POD=$(kubectl -n pulsar get pod -l component=standalone -o jsonpath='{.items[0].metadata.name}')
+          echo "Forwarding $POD 9092 -> localhost:9092"
+          kubectl -n pulsar port-forward "$POD" 9092:9092 &
+          for i in $(seq 1 30); do
+            if bash -c 'echo > /dev/tcp/127.0.0.1/9092' 2>/dev/null; then
+              echo "Kafka listener reachable"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Kafka listener did not become reachable" >&2
+          exit 1
+      - name: Run e2e tests
+        env:
+          KAFKA_BOOTSTRAP_SERVERS: 127.0.0.1:9092
+        run: ./mvnw -B -ntp -pl e2e-tests -Pe2e test
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p e2e-diagnostics
+          kubectl -n pulsar get all -o wide > e2e-diagnostics/get-all.txt 2>&1 || true
+          kubectl -n pulsar describe pods -l component=standalone > e2e-diagnostics/describe-pods.txt 2>&1 || true
+          kubectl -n pulsar get events --sort-by=.lastTimestamp > e2e-diagnostics/events.txt 2>&1 || true
+          kubectl -n pulsar logs -l component=standalone --all-containers --tail=-1 --prefix > e2e-diagnostics/standalone-logs.txt 2>&1 || true
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics
+          path: e2e-diagnostics/
+          if-no-files-found: ignore

@@ -1,0 +1,3 @@
+name: kafka
+description: Kafka Protocol Handler for Apache Pulsar
+handlerClass: io.github.kafkapulsar.KafkaProtocolHandler

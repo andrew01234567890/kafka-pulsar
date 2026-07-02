@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.kafkapulsar</groupId>
+  <artifactId>kafka-pulsar-parent</artifactId>
+  <version>${revision}${sha1}${changelist}</version>
+  <packaging>pom</packaging>
+
+  <name>Kafka Protocol Handler for Apache Pulsar :: Parent</name>
+  <description>A Pulsar ProtocolHandler that lets native Apache Kafka clients speak to an Apache Pulsar broker.</description>
+  <url>https://github.com/andrew01234567890/kafka-pulsar</url>
+
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+
+  <modules>
+    <module>kafka-common</module>
+    <module>kafka-protocol-handler</module>
+    <module>e2e-tests</module>
+  </modules>
+
+  <properties>
+    <!-- CI-friendly version: PR/local builds resolve to 0.0.0-SNAPSHOT; the release build passes
+         -Drevision=X.Y.Z -Dchangelist= to stamp the semver parsed from the merged PR title. -->
+    <revision>0.0.0-SNAPSHOT</revision>
+    <changelist/>
+    <sha1/>
+
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+
+    <!-- Target platform: bump pulsar.version + the broker base-image tag together to move to a
+         newer Pulsar (e.g. 5.0 GA); the ProtocolHandler SPI contract is stable across versions. -->
+    <pulsar.version>4.2.2</pulsar.version>
+    <kafka.version>4.3.1</kafka.version>
+
+    <slf4j.version>1.7.36</slf4j.version>
+    <junit.version>5.11.4</junit.version>
+    <assertj.version>3.26.3</assertj.version>
+    <kubernetes-client.version>6.13.4</kubernetes-client.version>
+
+    <nifi-nar-maven-plugin.version>1.5.0</nifi-nar-maven-plugin.version>
+    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+    <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
+    <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>org.apache.pulsar</groupId>
+        <artifactId>pulsar-broker</artifactId>
+        <version>${pulsar.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.kafka</groupId>
+        <artifactId>kafka-clients</artifactId>
+        <version>${kafka.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+        <scope>provided</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>io.fabric8</groupId>
+        <artifactId>kubernetes-client</artifactId>
+        <version>${kubernetes-client.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.github.kafkapulsar</groupId>
+        <artifactId>kafka-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.kafkapulsar</groupId>
+        <artifactId>kafka-protocol-handler</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven-compiler-plugin.version}</version>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${maven-surefire-plugin.version}</version>
+          <configuration>
+            <!-- Kafka/Netty codecs are leak-sensitive: fail the build on a Netty buffer leak. -->
+            <argLine>-Dio.netty.leakDetection.level=paranoid</argLine>
+            <forkCount>1</forkCount>
+            <reuseForks>false</reuseForks>
+            <!-- Cluster e2e tests are @Tag("e2e") and excluded from the normal build;
+                 they run only under -Pe2e. -->
+            <excludedGroups>e2e</excludedGroups>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${maven-failsafe-plugin.version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.nifi</groupId>
+          <artifactId>nifi-nar-maven-plugin</artifactId>
+          <version>${nifi-nar-maven-plugin.version}</version>
+          <extensions>true</extensions>
+          <configuration>
+            <finalName>${project.artifactId}-${project.version}</finalName>
+          </configuration>
+          <executions>
+            <execution>
+              <id>default-nar</id>
+              <phase>package</phase>
+              <goals>
+                <goal>nar</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+
+  <profiles>
+    <!-- nifi-nar-maven-plugin >= 2.0.0 requires Java 21+ (matches Pulsar's own jdk21 profile). -->
+    <profile>
+      <id>jdk21</id>
+      <activation>
+        <jdk>[21,)</jdk>
+      </activation>
+      <properties>
+        <nifi-nar-maven-plugin.version>2.1.0</nifi-nar-maven-plugin.version>
+      </properties>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.nifi</groupId>
+              <artifactId>nifi-nar-maven-plugin</artifactId>
+              <version>${nifi-nar-maven-plugin.version}</version>
+              <extensions>true</extensions>
+              <configuration>
+                <skipDocGeneration>true</skipDocGeneration>
+                <finalName>${project.artifactId}-${project.version}</finalName>
+              </configuration>
+              <executions>
+                <execution>
+                  <id>default-nar</id>
+                  <phase>package</phase>
+                  <goals>
+                    <goal>nar</goal>
+                  </goals>
+                </execution>
+              </executions>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+
+    <!-- Enable the cluster e2e suite: run ONLY the @Tag("e2e") tests. -->
+    <profile>
+      <id>e2e</id>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <groups>e2e</groups>
+                <excludedGroups combine.self="override"/>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,8 @@
+# Broker image for end-to-end tests: stock Apache Pulsar plus the Kafka protocol handler NAR
+# dropped into the broker's protocol-handler directory. Build from the repo root:
+#   docker build -t kafka-pulsar-broker:e2e -f docker/Dockerfile.broker .
+ARG PULSAR_VERSION=4.2.2
+FROM apachepulsar/pulsar:${PULSAR_VERSION}
+
+# protocolHandlerDirectory defaults to ./protocols (i.e. /pulsar/protocols).
+COPY kafka-protocol-handler/target/kafka-protocol-handler-*.nar /pulsar/protocols/

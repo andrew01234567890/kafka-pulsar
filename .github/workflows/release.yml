@@ -1,0 +1,71 @@
+name: Release
+
+# Runs only after a successful CI run on a push to main. PR-triggered CI runs carry
+# workflow_run.event == 'pull_request' and are excluded, so a PR build can never cut a release.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Derive semver from the merged PR title
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+            });
+            const merged = prs.find(p => p.merged_at);
+            const match = merged && merged.title.match(/^\[(\d+\.\d+\.\d+)\]/);
+            if (match) {
+              core.setOutput('version', match[1]);
+              core.info(`Releasing version ${match[1]} from PR #${merged.number}`);
+            } else {
+              core.info(`No merged PR with an [X.Y.Z] title for ${sha}; nothing to release.`);
+            }
+
+      - name: Build the versioned NAR
+        if: steps.version.outputs.version != ''
+        run: ./mvnw -B -ntp -Drevision=${{ steps.version.outputs.version }} -Dchangelist= clean package -DskipTests
+
+      - name: Tag and publish the GitHub Release
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; skipping."
+            exit 0
+          fi
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes \
+            "kafka-protocol-handler/target/kafka-protocol-handler-$VERSION.nar"

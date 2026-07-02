@@ -1,0 +1,27 @@
+# Build output
+target/
+*.nar
+*.jar
+*.class
+
+# Test / CI artifacts (never commit these)
+surefire-reports/
+failsafe-reports/
+e2e-diagnostics/
+kind-logs/
+*.log
+*.dump
+*.dumpstream
+
+# IDE / editor
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# OS
+.DS_Store
+Thumbs.db

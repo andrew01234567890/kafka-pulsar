@@ -1,0 +1,50 @@
+# Helm values to run Apache Pulsar in standalone mode on KIND with the Kafka protocol handler.
+# Used by the e2e-kind CI job:
+#   helm install pulsar-ci apache/pulsar -n pulsar --create-namespace -f deploy/values-standalone-kafka.yaml
+#
+# The custom broker image (built by docker/Dockerfile.broker and `kind load`ed) bakes the NAR into
+# /pulsar/protocols; pullPolicy Never keeps KIND from trying to pull it from a registry.
+
+# The bundled monitoring stack (VictoriaMetrics operator + Grafana) needs CRDs/webhooks that a bare
+# KIND cluster does not have ready at install time; it is not needed for e2e, so disable it.
+victoria-metrics-k8s-stack:
+  enabled: false
+
+# Run everything in a single standalone process; disable the distributed and ancillary components
+# so the footprint stays small enough for a CI KIND node.
+components:
+  zookeeper: false
+  bookkeeper: false
+  autorecovery: false
+  broker: false
+  proxy: false
+  toolset: false
+  functions: false
+  pulsar_manager: false
+  dekaf: false
+  oxia: false
+
+images:
+  standalone:
+    repository: kafka-pulsar-broker
+    tag: e2e
+    pullPolicy: Never
+
+# The proxy PodMonitor is gated only on proxy.podMonitor.enabled (not components.proxy), so it
+# renders even with the proxy disabled; turn it off to avoid the missing PodMonitor CRD.
+proxy:
+  podMonitor:
+    enabled: false
+
+standalone:
+  enabled: true
+  # PodMonitor requires the Prometheus Operator CRDs, which a bare KIND cluster does not have.
+  podMonitor:
+    enabled: false
+  configData:
+    PULSAR_PREFIX_messagingProtocols: "kafka"
+    PULSAR_PREFIX_kafkaListeners: "PLAINTEXT://0.0.0.0:9092"
+    PULSAR_PREFIX_kafkaAdvertisedListeners: "PLAINTEXT://127.0.0.1:9092"
+    # PIP-70: contiguous Kafka offsets from 0 require the broker-entry-metadata index interceptor.
+    PULSAR_PREFIX_brokerEntryMetadataInterceptors: "org.apache.pulsar.common.intercept.AppendIndexMetadataInterceptor"
+    PULSAR_PREFIX_protocolHandlerDirectory: "./protocols"
